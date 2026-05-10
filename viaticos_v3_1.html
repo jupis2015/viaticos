@@ -123,7 +123,7 @@
             font-size: 0.9em;
         }
 
-        .form-group input {
+        .form-group input, .form-group select {
             width: 100%;
             padding: 12px;
             border: 1px solid #ddd;
@@ -154,11 +154,6 @@
         .btn-cancelar {
             background: #95a5a6;
             margin-top: 10px;
-        }
-
-        .btn-anticipo {
-            background: #e67e22;
-            margin-bottom: 10px;
         }
 
         .btn-reiniciar {
@@ -235,6 +230,7 @@
             border-radius: 5px;
             font-size: 0.75em;
             display: inline-block;
+            cursor: pointer;
         }
 
         .alert {
@@ -304,11 +300,33 @@
             margin: 5px 0;
         }
 
-        .fecha-actual {
-            font-size: 12px;
-            color: #666;
-            margin-top: 5px;
-            text-align: right;
+        /* Modal para ver factura */
+        .modal-factura {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .modal-factura img, .modal-factura iframe {
+            max-width: 95%;
+            max-height: 80%;
+            background: white;
+            border-radius: 10px;
+        }
+        .modal-factura button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: auto;
+            padding: 10px 20px;
+            background: #e74c3c;
         }
 
         @media (max-width: 480px) {
@@ -376,6 +394,11 @@
                     <label>📅 Fecha:</label>
                     <input type="date" id="fecha" required>
                 </div>
+
+                <div class="form-group">
+                    <label>🏷️ Centro de Costo:</label>
+                    <input type="text" id="centroCosto" placeholder="Ej: Operaciones, Ventas, Administración...">
+                </div>
                 
                 <div class="form-group">
                     <label>📎 Factura (foto o PDF):</label>
@@ -391,11 +414,12 @@
 
         <h3>📋 Historial de Gastos</h3>
         <div class="tabla-container">
-            <table>
+            <table id="tablaGastos">
                 <thead>
                     <tr>
                         <th>Fecha</th>
                         <th>Descripción</th>
+                        <th>Centro Costo</th>
                         <th>Monto</th>
                         <th>Factura</th>
                         <th>Acciones</th>
@@ -405,6 +429,12 @@
             </table>
         </div>
     </div>
+</div>
+
+<!-- Modal para ver factura -->
+<div id="modalVerFactura" class="modal-factura" onclick="cerrarModalFactura()">
+    <button onclick="cerrarModalFactura()">✖ Cerrar</button>
+    <div id="contenidoFactura"></div>
 </div>
 
 <div id="modalAnticipo" class="modal">
@@ -432,7 +462,6 @@
     let gastos = [];
     let editandoId = null;
 
-    // Función para obtener fecha local CORRECTA (sin desfase UTC)
     function obtenerFechaLocal() {
         const ahora = new Date();
         const year = ahora.getFullYear();
@@ -441,9 +470,7 @@
         return `${year}-${month}-${day}`;
     }
 
-    // Función para formatear fecha para mostrar (local)
     function formatearFechaMostrar(fechaISO) {
-        // La fecha ya se guarda como YYYY-MM-DD directamente
         const partes = fechaISO.split('-');
         if (partes.length === 3) {
             return `${partes[2]}/${partes[1]}/${partes[0]}`;
@@ -455,8 +482,18 @@
         return "$" + monto.toLocaleString('es-CO');
     }
 
+    // Convertir archivo a Base64 (para guardar permanentemente)
+    function archivoABase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
     function cargarDatos() {
-        const guardado = localStorage.getItem("viaticos_movil_v4");
+        const guardado = localStorage.getItem("viaticos_movil_v6");
         if (guardado) {
             const datos = JSON.parse(guardado);
             anticipoBase = datos.anticipoBase || 1500000;
@@ -471,7 +508,7 @@
             gastos: gastos,
             ultimaActualizacion: new Date().toISOString()
         };
-        localStorage.setItem("viaticos_movil_v4", JSON.stringify(datos));
+        localStorage.setItem("viaticos_movil_v6", JSON.stringify(datos));
     }
 
     function totalGastado() {
@@ -504,7 +541,6 @@
         const saldoElement = document.getElementById("saldoRestante");
         if (saldo < 0) {
             saldoElement.style.color = "#e74c3c";
-            mostrarAlerta("⚠️ ¡Anticipo agotado! Usa 'Pedir más anticipo' para continuar", "warning");
         } else if (saldo < 100000) {
             saldoElement.style.color = "#e67e22";
         } else {
@@ -512,47 +548,74 @@
         }
     }
 
+    function verFactura(facturaBase64, tipo) {
+        const modal = document.getElementById("modalVerFactura");
+        const contenedor = document.getElementById("contenidoFactura");
+        contenedor.innerHTML = "";
+        
+        if (tipo === 'image') {
+            const img = document.createElement("img");
+            img.src = facturaBase64;
+            img.style.maxWidth = "95%";
+            img.style.maxHeight = "80%";
+            img.style.borderRadius = "10px";
+            contenedor.appendChild(img);
+        } else if (tipo === 'pdf') {
+            const iframe = document.createElement("iframe");
+            iframe.src = facturaBase64;
+            iframe.style.width = "95%";
+            iframe.style.height = "80%";
+            iframe.style.border = "none";
+            contenedor.appendChild(iframe);
+        }
+        
+        modal.style.display = "flex";
+    }
+
+    function cerrarModalFactura() {
+        document.getElementById("modalVerFactura").style.display = "none";
+        document.getElementById("contenidoFactura").innerHTML = "";
+    }
+
     function renderizarTabla() {
         const tbody = document.getElementById("listaGastos");
         tbody.innerHTML = "";
         
         if (gastos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty-state">📭 No hay gastos registrados</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">📭 No hay gastos registrados</td></tr>';
             return;
         }
         
-        // Ordenar por fecha (más reciente primero) - comparando strings YYYY-MM-DD
         const gastosOrdenados = [...gastos].sort((a, b) => b.fecha.localeCompare(a.fecha));
         
         gastosOrdenados.forEach((gasto, index) => {
             const fila = tbody.insertRow();
             const gastoOriginalIndex = gastos.findIndex(g => g.id === gasto.id);
             
-            // Mostrar fecha en formato DD/MM/YYYY
             fila.insertCell(0).innerText = formatearFechaMostrar(gasto.fecha);
             fila.insertCell(1).innerText = gasto.descripcion;
+            fila.insertCell(2).innerText = gasto.centroCosto || "—";
             
-            const celdaMonto = fila.insertCell(2);
+            const celdaMonto = fila.insertCell(3);
             celdaMonto.innerText = formatearMonto(gasto.monto);
             if (gasto.monto > 500000) {
                 celdaMonto.style.color = "#e74c3c";
                 celdaMonto.style.fontWeight = "bold";
             }
             
-            const celdaFactura = fila.insertCell(3);
-            if (gasto.facturaURL) {
-                const enlace = document.createElement("a");
-                enlace.href = gasto.facturaURL;
-                enlace.target = "_blank";
-                enlace.innerText = "📄 Ver";
-                enlace.className = "factura-link";
-                celdaFactura.appendChild(enlace);
+            const celdaFactura = fila.insertCell(4);
+            if (gasto.facturaBase64) {
+                const btnVer = document.createElement("button");
+                btnVer.innerText = "📄 Ver Factura";
+                btnVer.className = "factura-link";
+                btnVer.onclick = () => verFactura(gasto.facturaBase64, gasto.facturaTipo);
+                celdaFactura.appendChild(btnVer);
             } else {
                 celdaFactura.innerText = "—";
                 celdaFactura.style.color = "#999";
             }
             
-            const celdaAccion = fila.insertCell(4);
+            const celdaAccion = fila.insertCell(5);
             const btnEditar = document.createElement("button");
             btnEditar.innerText = "✏️";
             btnEditar.className = "btn-editar";
@@ -626,12 +689,13 @@
         document.getElementById("modalPedirMas").style.display = "none";
     }
 
-    function guardarGasto(event) {
+    async function guardarGasto(event) {
         event.preventDefault();
         
         const descripcion = document.getElementById("descripcion").value.trim();
         const monto = parseFloat(document.getElementById("monto").value);
-        let fecha = document.getElementById("fecha").value;
+        const fecha = document.getElementById("fecha").value;
+        const centroCosto = document.getElementById("centroCosto").value.trim();
         const facturaFile = document.getElementById("factura").files[0];
         
         if (!descripcion || isNaN(monto) || monto <= 0) {
@@ -644,15 +708,18 @@
             return;
         }
         
-        // Verificar si hay suficiente saldo
         if (monto > saldoRestante() && saldoRestante() > 0) {
             mostrarAlerta("⚠️ Te quedan " + formatearMonto(saldoRestante()) + " de anticipo. Usa 'Pedir más anticipo' si necesitas más.", "warning");
             return;
         }
         
-        let facturaURL = null;
+        let facturaBase64 = null;
+        let facturaTipo = null;
+        
         if (facturaFile) {
-            facturaURL = URL.createObjectURL(facturaFile);
+            const base64 = await archivoABase64(facturaFile);
+            facturaBase64 = base64;
+            facturaTipo = facturaFile.type.startsWith('image/') ? 'image' : 'pdf';
         }
         
         if (editandoId !== null) {
@@ -660,8 +727,10 @@
                 ...gastos[editandoId],
                 descripcion: descripcion,
                 monto: monto,
-                fecha: fecha,  // Guardar la fecha EXACTA seleccionada
-                facturaURL: facturaURL || gastos[editandoId].facturaURL
+                fecha: fecha,
+                centroCosto: centroCosto,
+                facturaBase64: facturaBase64 || gastos[editandoId].facturaBase64,
+                facturaTipo: facturaTipo || gastos[editandoId].facturaTipo
             };
             mostrarAlerta("✅ Gasto actualizado: " + formatearMonto(monto), "success");
             cancelarEdicion();
@@ -670,16 +739,19 @@
                 id: Date.now(),
                 descripcion: descripcion,
                 monto: monto,
-                fecha: fecha,  // Guardar la fecha EXACTA seleccionada
-                facturaURL: facturaURL,
-                fechaRegistro: obtenerFechaLocal()  // Fecha de registro local
+                fecha: fecha,
+                centroCosto: centroCosto,
+                facturaBase64: facturaBase64,
+                facturaTipo: facturaTipo,
+                fechaRegistro: obtenerFechaLocal()
             };
             gastos.push(nuevoGasto);
-            mostrarAlerta("✅ Gasto registrado: " + descripcion + " - " + formatearMonto(monto) + " - Fecha: " + formatearFechaMostrar(fecha), "success");
+            mostrarAlerta("✅ Gasto registrado: " + descripcion + " - " + formatearMonto(monto), "success");
         }
         
         document.getElementById("gastoForm").reset();
-        document.getElementById("fecha").value = obtenerFechaLocal();  // Usar fecha local correcta
+        document.getElementById("fecha").value = obtenerFechaLocal();
+        document.getElementById("centroCosto").value = "";
         actualizarInterfaz();
     }
 
@@ -690,6 +762,7 @@
         document.getElementById("descripcion").value = gasto.descripcion;
         document.getElementById("monto").value = gasto.monto;
         document.getElementById("fecha").value = gasto.fecha;
+        document.getElementById("centroCosto").value = gasto.centroCosto || "";
         
         document.getElementById("formTitulo").innerText = "✏️ Editando Gasto";
         document.getElementById("btnCancelar").style.display = "block";
@@ -701,6 +774,7 @@
         editandoId = null;
         document.getElementById("gastoForm").reset();
         document.getElementById("fecha").value = obtenerFechaLocal();
+        document.getElementById("centroCosto").value = "";
         document.getElementById("formTitulo").innerText = "📝 Nuevo Gasto";
         document.getElementById("btnCancelar").style.display = "none";
     }
@@ -727,7 +801,6 @@
     document.getElementById("gastoForm").addEventListener("submit", guardarGasto);
     document.getElementById("btnCancelar").addEventListener("click", cancelarEdicion);
     
-    // Inicializar con fecha local correcta
     document.getElementById("fecha").value = obtenerFechaLocal();
     cargarDatos();
 </script>
